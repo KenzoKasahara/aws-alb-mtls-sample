@@ -64,18 +64,28 @@ openssl req -x509 -new -nodes -key key/server.key -sha256 -days 365 \
 aws acm import-certificate \
   --certificate fileb://key/server.crt \
   --private-key fileb://key/server.key \
-  --region ap-northeast-1
+  --region ap-northeast-1 \
   --profile <my-profile>
 
-# Root CA とクライアント証明書
+# Root CA とクライアント証明書（Trust Store に登録する CA）
 openssl genrsa -out key/ca.key 2048
 openssl req -x509 -new -nodes -key key/ca.key -sha256 -days 3650 \
   -subj "/CN=Test Root CA" -out key/ca.crt
 
-openssl genrsa -out client.key 2048
-openssl req -new -key client.key -subj "/CN=test-client" -out client.csr
-openssl x509 -req -in client.csr -CA key/ca.crt -CAkey key/ca.key \
-  -CAcreateserial -days 365 -sha256 -out client.crt
+openssl genrsa -out key/client.key 2048
+openssl req -new -key key/client.key -subj "/CN=test-client" -out key/client.csr
+openssl x509 -req -in key/client.csr -CA key/ca.crt -CAkey key/ca.key \
+  -CAcreateserial -days 365 -sha256 -out key/client.crt
+
+# CA 不一致テスト用：Trust Store に未登録の別 CA でクライアント証明書を発行
+openssl genrsa -out key/other-ca.key 2048
+openssl req -x509 -new -nodes -key key/other-ca.key -sha256 -days 3650 \
+  -subj "/CN=Other Root CA" -out key/other-ca.crt
+
+openssl genrsa -out key/other-ca-client.key 2048
+openssl req -new -key key/other-ca-client.key -subj "/CN=other-client" -out key/other-ca-client.csr
+openssl x509 -req -in key/other-ca-client.csr -CA key/other-ca.crt -CAkey key/other-ca.key \
+  -CAcreateserial -days 365 -sha256 -out key/other-ca-client.crt
 ```
 
 ### 2. CA バンドルをローカルに配置
@@ -90,7 +100,7 @@ cp key/ca.crt key/ca-bundle.pem
 cd terraform
 
 cp terraform.tfvars.example terraform.tfvars
-# terraform.tfvars に vpc_id / subnet ids / certificate_arn / ca_bundle_s3_bucket を設定
+# terraform.tfvars に vpc_id / public_subnet_ids / private_subnet_id / certificate_arn を設定
 # ca_bundle_local_path はデフォルト値 "../key/ca-bundle.pem" で動作します
 
 terraform init
@@ -101,19 +111,25 @@ terraform apply
 
 ### 4. 動作確認
 
+`terraform/` ディレクトリから以下を実行します。
+
 ```bash
 . ../scripts/operation-confirmation.sh
+```
 
+スクリプトの内容は以下の通りです。
+
+```bash
 ALB_DNS=$(terraform output -raw alb_dns_name)
 
 # 証明書あり → 200 OK
-curl -k --cert key/client.crt --key key/client.key https://$ALB_DNS/
+curl -k --cert ../key/client.crt --key ../key/client.key https://$ALB_DNS/
 
 # 証明書なし → SSL エラー
 curl -k https://$ALB_DNS/
 
 # CA 不一致 → SSL エラー
-curl -k --cert key/other-ca-client.crt --key key/other-ca-client.key https://$ALB_DNS/
+curl -k --cert ../key/other-ca-client.crt --key ../key/other-ca-client.key https://$ALB_DNS/
 ```
 
 ---
