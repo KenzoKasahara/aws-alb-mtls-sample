@@ -1,0 +1,10 @@
+aws_region   = "ap-northeast-1"
+aws_profile  = "default"
+project_name = "mtls-sample"
+
+vpc_id             = "vpc-xxxxxxxxxxxxxxxxx"
+public_subnet_ids  = ["subnet-xxxxxxxxxxxxxxxxx", "subnet-yyyyyyyyyyyyyyyyy"]
+private_subnet_id  = "subnet-zzzzzzzzzzzzzzzzz"
+certificate_arn    = "arn:aws:acm:ap-northeast-1:123456789012:certificate/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+ca_bundle_local_path = "../key/ca-bundle.pem"
