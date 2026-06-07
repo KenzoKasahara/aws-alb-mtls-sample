@@ -9,9 +9,9 @@ terraform {
   }
 }
 
+# aws-vault が環境変数でクレデンシャルを注入するため profile 指定不要
 provider "aws" {
-  region  = var.aws_region
-  profile = var.aws_profile
+  region = var.aws_region
 }
 
 data "aws_ami" "al2023" {

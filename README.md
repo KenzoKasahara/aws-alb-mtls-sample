@@ -44,13 +44,22 @@ ALB の mTLS verify モードを最小構成で動かし、以下の3パター�
 
 ## 前提条件
 
+- [aws-vault](https://github.com/99designs/aws-vault) >= 7.x（認証情報の管理に使用）
 - Terraform >= 1.10
-- AWS CLI（認証済み）
+- AWS CLI
 - OpenSSL
 
 ---
 
 ## 使い方
+
+### 0. aws-vault プロファイルを設定する
+
+以降のコマンドはすべて `aws-vault exec` 経由で実行します。プロファイル名を変数に設定しておくと便利です。
+
+```bash
+export PROFILE=<your-aws-vault-profile>
+```
 
 ### 1. 証明書の準備
 
@@ -61,11 +70,10 @@ mkdir key
 openssl genrsa -out key/server.key 2048
 openssl req -x509 -new -nodes -key key/server.key -sha256 -days 365 \
   -subj "/CN=mtls-sample.example.com" -out key/server.crt
-aws acm import-certificate \
+aws-vault exec $PROFILE -- aws acm import-certificate \
   --certificate fileb://key/server.crt \
   --private-key fileb://key/server.key \
-  --region ap-northeast-1 \
-  --profile <my-profile>
+  --region ap-northeast-1
 
 # Root CA とクライアント証明書（Trust Store に登録する CA）
 openssl genrsa -out key/ca.key 2048
@@ -103,24 +111,25 @@ cp terraform.tfvars.example terraform.tfvars
 # terraform.tfvars に vpc_id / public_subnet_ids / private_subnet_id / certificate_arn を設定
 # ca_bundle_local_path はデフォルト値 "../key/ca-bundle.pem" で動作します
 
-terraform init
-terraform apply
+aws-vault exec $PROFILE -- terraform init
+aws-vault exec $PROFILE -- terraform plan
+aws-vault exec $PROFILE -- terraform apply
 ```
 
 `terraform apply` 時に S3 バケットの作成 → CA バンドルのアップロード → Trust Store の作成が自動的に順序どおり実行されます。
 
 ### 4. 動作確認
 
-`terraform/` ディレクトリから以下を実行します。
+`terraform/` ディレクトリから以下を実行します。`terraform output` が AWS 認証を必要とするため、aws-vault セッション内で実行してください。
 
 ```bash
-. ../scripts/operation-confirmation.sh
+aws-vault exec $PROFILE -- bash -c '. ../scripts/operation-confirmation.sh'
 ```
 
 スクリプトの内容は以下の通りです。
 
 ```bash
-ALB_DNS=$(terraform output -raw alb_dns_name)
+ALB_DNS=$(aws-vault exec $PROFILE -- terraform output -raw alb_dns_name)
 
 # 証明書あり → 200 OK
 curl -k --cert ../key/client.crt --key ../key/client.key https://$ALB_DNS/
@@ -134,8 +143,39 @@ curl -k --cert ../key/other-ca-client.crt --key ../key/other-ca-client.key https
 
 ---
 
+## Windows (Git Bash) での curl の注意点
+
+Git for Windows に同梱されている `curl` は **Schannel**（Windows 標準の TLS ライブラリ）ビルドです。  
+Schannel の `curl` は `--cert` オプションに PEM 形式（`.crt`）を渡すと以下のエラーになります。
+
+```text
+curl: (58) schannel: Failed to import cert file ..., last error is 0x80092002
+```
+
+### 対処方法
+
+[scoop](https://scoop.sh/) で LibreSSL / OpenSSL ビルドの `curl` をインストールします。
+
+```bash
+scoop install curl
+```
+
+インストール後、Git Bash で新しいターミナルを開くか VSCode を再起動してください。  
+`operation-confirmation.sh` は起動時に Schannel ビルドを自動検出し、scoop の `curl`（`~/scoop/shims/curl`）を優先するよう PATH を設定します。scoop の `curl` が見つからない場合はエラーメッセージを表示して終了します。
+
+動作している curl を確認するには以下を実行します。
+
+```bash
+which curl
+curl --version | grep -i ssl
+# LibreSSL または OpenSSL と表示されれば OK
+# Schannel と表示される場合は PATH が古い（ターミナルを再起動）
+```
+
+---
+
 ## 作成リソースの削除
 
 ```bash
-terraform destroy
+aws-vault exec $PROFILE -- terraform destroy
 ```
